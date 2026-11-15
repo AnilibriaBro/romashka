@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#060a34">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Любит — не любит</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: #060a34; overflow: hidden; touch-action: none; }
+  body { display: flex; align-items: center; justify-content: center; height: 100dvh; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; display: block;
+           -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+</style>
+</head>
+<body>
+<canvas id="c" width="180" height="240"></canvas>
+<script>
+"use strict";
+// Мир 180 пикселей в ширину; высота подстраивается под экран телефона (небо растёт вверх).
+const W = 180;
+let H = 240, OY = 0, GROUND_Y, HEAD_X = 90, HEAD_Y, STEM_BOTTOM;
+const PINK = [255, 143, 192], BLUE = [169, 188, 255], CREAM = [255, 236, 200], SHADOW = [14, 10, 40];
+const HEART_COLORS = [PINK, [255, 110, 160], [255, 180, 210]];
+const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+let CX = 90, CY = 100;
+
+const rgb = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+const lerp = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const rand = (a, b) => a + Math.random() * (b - a);
+function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function canvas(w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; const x = c.getContext("2d"); x.imageSmoothingEnabled = false; return [c, x]; }
+function crisp(c) {
+  const x = c.getContext("2d"), d = x.getImageData(0, 0, c.width, c.height);
+  for (let i = 3; i < d.data.length; i += 4) d.data[i] = d.data[i] > 110 ? 255 : 0;
+  x.putImageData(d, 0, 0); return c;
+}
+const px = (x, y, c) => { ctx.fillStyle = rgb(c); ctx.fillRect(Math.round(x), Math.round(y), 1, 1); };
+
+// ---------- пиксельный шрифт 5×7 (каждая буква чёткая, не слипается) ----------
+const G = {
+  "А": [" ### ", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"],
+  "Б": ["#####", "#    ", "#    ", "#### ", "#   #", "#   #", "#### "],
+  "В": ["#### ", "#   #", "#   #", "#### ", "#   #", "#   #", "#### "],
+  "Г": ["#####", "#    ", "#    ", "#    ", "#    ", "#    ", "#    "],
+  "Д": ["  ## ", " #  #", " #  #", " #  #", " #  #", "#####", "#   #"],
+  "Е": ["#####", "#    ", "#    ", "#### ", "#    ", "#    ", "#####"],
+  "З": [" ### ", "#   #", "    #", "  ## ", "    #", "#   #", " ### "],
+  "И": ["#   #", "#   #", "#  ##", "# # #", "##  #", "#   #", "#   #"],
+  "К": ["#   #", "#  # ", "# #  ", "##   ", "# #  ", "#  # ", "#   #"],
+  "Л": ["  ###", " #  #", " #  #", " #  #", " #  #", " #  #", "##  #"],
+  "М": ["#   #", "## ##", "# # #", "# # #", "#   #", "#   #", "#   #"],
+  "Н": ["#   #", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"],
+  "О": [" ### ", "#   #", "#   #", "#   #", "#   #", "#   #", " ### "],
+  "П": ["#####", "#   #", "#   #", "#   #", "#   #", "#   #", "#   #"],
+  "Р": ["#### ", "#   #", "#   #", "#### ", "#    ", "#    ", "#    "],
+  "С": [" ### ", "#   #", "#    ", "#    ", "#    ", "#   #", " ### "],
+  "Т": ["#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "  #  "],
+  "У": ["#   #", "#   #", "#   #", " ####", "    #", "#   #", " ### "],
+  "Ч": ["#   #", "#   #", "#   #", " ####", "    #", "    #", "    #"],
+  "Ш": ["#   #", "#   #", "# # #", "# # #", "# # #", "# # #", "#####"],
+  "Ы": ["#   #", "#   #", "#   #", "##  #", "# # #", "# # #", "##  #"],
+  "Ь": ["#    ", "#    ", "#    ", "#### ", "#   #", "#   #", "#### "],
+  "Э": [" ### ", "#   #", "    #", "  ###", "    #", "#   #", " ### "],
+  "Ю": ["#  # ", "# # #", "# # #", "### #", "# # #", "# # #", "#  # "],
+  "Я": [" ####", "#   #", "#   #", " ####", "  # #", " #  #", "#   #"],
+  "!": ["  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "     ", "  #  "],
+  ".": ["     ", "     ", "     ", "     ", "     ", "     ", "  #  "],
+  "…": ["     ", "     ", "     ", "     ", "     ", "     ", "# # #"],
+  "-": ["     ", "     ", "     ", "#####", "     ", "     ", "     "],
+  " ": ["     ", "     ", "     ", "     ", "     ", "     ", "     "],
+};
+const textCache = new Map();
+function textImg(s, scale, col) {
+  s = s.toUpperCase();
+  const key = s + scale + col;
+  if (textCache.has(key)) return textCache.get(key);
+  const chars = [...s], [c, x] = canvas(chars.length * 6 * scale - scale, 7 * scale);
+  x.fillStyle = rgb(col);
+  chars.forEach((ch, i) => (G[ch] || G[" "]).forEach((row, y) => [...row].forEach((b, xx) => {
+    if (b === "#") x.fillRect((i * 6 + xx) * scale, y * scale, scale, scale);
+  })));
+  textCache.set(key, c); return c;
+}
+function drawText(s, scale, col, cy, pop = 1) {
+  const img = textImg(s, scale, col);
+  let w = img.width, h = img.height;
+  if (pop < 1) { const k = 1 + 0.5 * (1 - pop) * Math.cos(pop * 6); w = Math.round(w * k); h = Math.round(h * k); }
+  const x = Math.round(W / 2 - w / 2), y = Math.round(cy - h / 2), sh = Math.max(1, scale - 1);
+  ctx.drawImage(textImg(s, scale, SHADOW), x + sh, y + sh, w, h);
+  ctx.drawImage(img, x, y, w, h);
+}
+
+// ---------- сцена (пересобирается под размер экрана) ----------
+let bgNight, bgDawn, stars, grass, fireflies;
+function makeBackground(top, bottom, hillFar, hillNear, ground) {
+  const [c, x] = canvas(W, H), img = x.createImageData(W, H), bands = 8 + Math.round(OY / 30), skyH = 190 + OY;
+  for (let y = 0; y < H; y++) {
+    const t = Math.min(1, y / skyH), v = t * bands, i = Math.floor(v), fr = v - i;
+    for (let xx = 0; xx < W; xx++) {
+      const k = i + (fr > BAYER[y % 4][xx % 4] / 16 ? 1 : 0), col = lerp(top, bottom, Math.min(k, bands) / bands), o = (y * W + xx) * 4;
+      img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  for (let xx = 0; xx < W; xx++) {
+    x.fillStyle = rgb(hillFar); x.fillRect(xx, Math.floor(OY + 166 + 9 * Math.sin(xx * 0.035) + 5 * Math.sin(xx * 0.09 + 1)), 1, H);
+    x.fillStyle = rgb(hillNear); x.fillRect(xx, Math.floor(OY + 186 + 4 * Math.sin(xx * 0.06 + 2)), 1, H);
+  }
+  x.fillStyle = rgb(ground); x.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+  const r = mulberry(7); x.fillStyle = rgb(lerp(ground, [0, 0, 0], 0.25));
+  for (let i = 0; i < 260; i++) x.fillRect(Math.floor(r() * W), GROUND_Y + Math.floor(r() * (H - GROUND_Y)), 1, 1);
+  return c;
+}
+function setup() {
+  const ratio = innerHeight / innerWidth;
+  const newH = ratio > 4 / 3 ? Math.min(460, Math.round(W * ratio)) : 240;
+  const dy = (newH - 240) - OY;
+  if (newH !== H || !bgNight) {
+    H = newH; OY = H - 240; cv.width = W; cv.height = H;
+    ctx.imageSmoothingEnabled = false;
+    GROUND_Y = 200 + OY; HEAD_Y = 100 + OY; STEM_BOTTOM = [90, 206 + OY];
+    bgNight = makeBackground([6, 10, 52], [104, 64, 148], [28, 36, 104], [20, 66, 50], [30, 88, 42]);
+    bgDawn = makeBackground([70, 50, 130], [255, 160, 140], [110, 70, 140], [60, 110, 70], [52, 120, 56]);
+    const r = mulberry(4);
+    stars = Array.from({ length: 55 + Math.round(OY / 4) }, () => [2 + Math.floor(r() * (W - 4)), 2 + Math.floor(r() * (138 + OY)), r() * 6.28, r() < 0.2]);
+    grass = Array.from({ length: 170 }, () => [Math.floor(r() * W), GROUND_Y - 6 + Math.floor(r() * 42), 3 + Math.floor(r() * 7),
+      [[60, 150, 60], [40, 120, 50], [90, 180, 70]][Math.floor(r() * 3)], r() * 6.28]);
+    fireflies = Array.from({ length: 9 }, () => [10 + r() * (W - 20), GROUND_Y - 80 + r() * 80, r() * 6.28]);
+    if (petals && dy) { // экран поменялся посреди игры — сдвигаем всё, что уже летит
+      for (const f of falling) { f.y += dy; f.landY += dy; }
+      for (const p of fallen) p[1] += dy;
+      for (const h of hearts) { h.y += dy; h.sy += dy; if (h.target) h.target[1] += dy; }
+    }
+  }
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  cv.style.width = W * k + "px"; cv.style.height = H * k + "px";
+}
+
+function makeMoon() {
+  const [c, x] = canvas(40, 40);
+  for (let y = 0; y < 40; y++) for (let xx = 0; xx < 40; xx++) {
+    const d = Math.hypot(xx - 20, y - 20);
+    if (d > 9 && d < 19 && (xx + y) % 2 === 0 && BAYER[y % 4][xx % 4] / 16 > (d - 9) / 10) { x.fillStyle = "rgba(230,230,200,0.35)"; x.fillRect(xx, y, 1, 1); }
+  }
+  const disk = (cx, cy, r, col) => { x.fillStyle = rgb(col); for (let y = -r; y <= r; y++) for (let xx = -r; xx <= r; xx++) if (xx * xx + y * y <= r * r + r) x.fillRect(cx + xx, cy + y, 1, 1); };
+  disk(20, 20, 8, [246, 240, 205]); disk(17, 18, 2, [215, 210, 175]); disk(23, 22, 1, [215, 210, 175]); disk(21, 16, 1, [215, 210, 175]);
+  return c;
+}
+const moon = makeMoon();
+
+const petalCache = new Map();
+function petalImg(angle, step = 6) {
+  const a = ((Math.floor(angle) % 360) + 360) % 360, key = a * 10 + step;
+  let c = petalCache.get(key);
+  if (c) return c;
+  let x; [c, x] = canvas(48, 48);
+  const sc = step / 6, ln = Math.max(2, Math.floor(21 * sc)), wd = Math.max(2, Math.floor(9 * sc));
+  x.translate(24, 24); x.rotate(a * Math.PI / 180);
+  x.fillStyle = "rgb(150,170,225)"; x.beginPath(); x.ellipse(3 + ln / 2, 0, ln / 2, wd / 2, 0, 0, 7); x.fill();
+  x.fillStyle = "rgb(236,242,255)"; x.beginPath(); x.ellipse(3 + ln / 2, 0, ln / 2 - 1, wd / 2 - 1, 0, 0, 7); x.fill();
+  if (ln > 8) { x.fillStyle = "#fff"; x.fillRect(8, -2, ln - 10, 1); x.fillStyle = "rgb(200,214,248)"; x.fillRect(6, 0, ln - 6, 1); }
+  crisp(c); petalCache.set(key, c); return c;
+}
+function blitPetal(x, y, angle, step = 6) { ctx.drawImage(petalImg(angle, step), Math.round(x) - 24, Math.round(y) - 24); }
+const flat = (() => { const [c, x] = canvas(14, 5);
+  x.fillStyle = "rgb(150,170,225)"; x.beginPath(); x.ellipse(7, 2.5, 7, 2.5, 0, 0, 7); x.fill();
+  x.fillStyle = "rgb(225,232,252)"; x.beginPath(); x.ellipse(7, 2.5, 6, 1.5, 0, 0, 7); x.fill(); return crisp(c); })();
+const flatFlip = (() => { const [c, x] = canvas(14, 5); x.scale(-1, 1); x.drawImage(flat, -14, 0); return c; })();
+
+const HEART_BITS = ["0110110", "1111111", "1111111", "0111110", "0011100", "0001000"];
+const heartImgs = HEART_COLORS.map(col => { const [c, x] = canvas(7, 6);
+  HEART_BITS.forEach((row, y) => [...row].forEach((b, xx) => { if (b === "1") { x.fillStyle = rgb(col); x.fillRect(xx, y, 1, 1); } }));
+  x.fillStyle = rgb(lerp(col, [255, 255, 255], 0.5)); x.fillRect(1, 1, 1, 1); return c; });
+
+// ---------- звук и музыка (всё синтезируется, без файлов) ----------
+let audio = null, master = null, musicBus = null;
+const SCALE = [523.25, 587.33, 659.25, 783.99, 880, 1046.5, 1174.7, 1318.5];
+const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+function voice(f, t, dur, vol, type = "sine", dest = master, partial = 0.3) {
+  for (const [mul, v] of [[1, 1], [2, partial], [3, partial * 0.3]]) {
+    if (!v) continue;
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = type; o.frequency.value = f * mul;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol * v, t + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur * (mul === 1 ? 1 : 0.4));
+    o.connect(g).connect(dest); o.start(t); o.stop(t + dur + 0.05);
+  }
+}
+function note(f, when = 0, dur = 0.5, vol = 0.16) { if (audio) voice(f, audio.currentTime + when, dur, vol); }
+
+// Тихая колыбельная-«музыкальная шкатулка»: аккорды C–Am–F–G, к финалу «не любит» уходит в минор.
+const MAJOR = [[60, 64, 67], [57, 60, 64], [53, 57, 60], [55, 59, 62]];
+const MINOR = [[57, 60, 64], [53, 57, 60], [50, 53, 57], [52, 56, 59]];
+const PATTERN = [0, 1, 2, 1, 3, 2, 1, 2];
+let mood = "major", nextBeat = 0, beat = 0, tempo = 0.36;
+function scheduleMusic() {
+  if (!audio || audio.state !== "running") return;
+  if (nextBeat < audio.currentTime) nextBeat = audio.currentTime + 0.05;
+  while (nextBeat < audio.currentTime + 0.3) {
+    const prog = mood === "minor" ? MINOR : MAJOR, chord = prog[Math.floor(beat / 8) % 4], step = beat % 8;
+    if (step === 0) {
+      voice(hz(chord[0] - 12), nextBeat, tempo * 7, 0.09, "sine", musicBus, 0.25);           // бас
+      for (const m of chord) voice(hz(m), nextBeat, tempo * 8, 0.045, "triangle", musicBus, 0); // мягкий «пэд»
+    }
+    const tones = [chord[0] + 12, chord[1] + 12, chord[2] + 12, chord[0] + 24];
+    voice(hz(tones[PATTERN[step]]), nextBeat, 1.8, 0.07, "sine", musicBus, 0.1);          // мягкий перебор
+    nextBeat += tempo; beat++;
+  }
+}
+setInterval(scheduleMusic, 60);
+function unlockAudio() {
+  if (!audio) {
+    try {
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+      master = audio.createGain(); master.gain.value = 1; master.connect(audio.destination);
+      musicBus = audio.createGain(); musicBus.gain.setValueAtTime(0, audio.currentTime); musicBus.connect(master);
+      musicBus.gain.linearRampToValueAtTime(1, audio.currentTime + 3); // музыка плавно появляется
+    } catch (e) { audio = null; }
+  }
+  if (audio && audio.state === "suspended") audio.resume();
+}
+for (const ev of ["pointerup", "touchend", "click"]) document.addEventListener(ev, unlockAudio, { passive: true });
+document.addEventListener("visibilitychange", () => { if (audio) document.hidden ? audio.suspend() : audio.resume(); });
+
+// ---------- игра ----------
+let t = 0, state, petals, torn, falling, fallen, hearts, drops, text, textPop, result, endT, dawn, grow, meteor;
+function reset() {
+  const n = 11 + 2 * Math.floor(Math.random() * 3), base = rand(0, 360);
+  petals = Array.from({ length: n }, (_, i) => base + i * 360 / n);
+  torn = 0; falling = []; fallen = []; hearts = []; drops = [];
+  text = ""; textPop = 1; result = null; endT = 0; dawn = 0; grow = 0; meteor = null; state = "grow"; mood = "major";
+}
+setup(); reset();
+const swayDeg = () => Math.sin(t * 1.1) * 4;
+
+function tear(idx = 0) {
+  if (state === "grow") { grow = 1; return; }
+  if (state !== "play" || !petals.length) return;
+  const ang = petals.splice(idx, 1)[0] + swayDeg(), a = ang * Math.PI / 180;
+  falling.push({ x: CX, y: CY, angle: ang, vx: Math.cos(a) * 30 + rand(-8, 8), vy: Math.sin(a) * 30 - 25,
+    spin: (Math.random() < 0.5 ? -1 : 1) * rand(90, 200), phase: rand(0, 6.28), landY: rand(GROUND_Y + 4, H - 6) });
+  torn++;
+  const loves = torn % 2 === 1;
+  text = loves ? "ЛЮБИТ" : "НЕ ЛЮБИТ"; textPop = 0;
+  if (!petals.length) finish(loves);
+}
+function finish(loves) {
+  state = "end"; result = loves; endT = 0;
+  if (loves) {
+    mood = "love";
+    for (let i = 0; i < 32; i++) {
+      const a = i / 32 * 2 * Math.PI, hx = 16 * Math.sin(a) ** 3,
+        hy = 13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a);
+      hearts.push(newHeart(CX - 3, CY - 3, [HEAD_X + hx * 2.7 - 3, HEAD_Y - 6 - hy * 2.7], 0.4 + i * 0.03));
+    }
+  } else {
+    mood = "minor";
+  }
+}
+const newHeart = (x, y, target = null, delay = 0) => ({ x, y, sx: x, sy: y, target, delay, t: 0, life: rand(2.5, 4),
+  phase: rand(0, 6.28), img: heartImgs[Math.floor(Math.random() * 3)] });
+
+function petalAt(mx, my) {
+  const dx = mx - CX, dy = my - CY, d = Math.hypot(dx, dy);
+  if (d > 40 || !petals.length) return null;
+  const ang = Math.atan2(dy, dx) * 180 / Math.PI, sw = swayDeg();
+  const diff = p => Math.abs((((p + sw - ang + 180) % 360) + 360) % 360 - 180);
+  let best = 0; petals.forEach((p, i) => { if (diff(p) < diff(petals[best])) best = i; });
+  return d < 6 || diff(petals[best]) < 24 ? best : null;
+}
+
+function update(dt) {
+  t += dt;
+  if (state === "grow") { grow = Math.min(1, grow + dt / 2.6); if (grow >= 1) state = "play"; }
+  textPop = Math.min(1, textPop + dt * 4);
+  for (const f of [...falling]) {
+    f.vy = Math.min(f.vy + 60 * dt, 16); f.vx *= 1 - 1.5 * dt;
+    f.x += (f.vx + Math.sin(t * 3 + f.phase) * 14 + 4) * dt; f.y += f.vy * dt; f.angle += f.spin * dt;
+    if (f.y >= f.landY) { falling.splice(falling.indexOf(f), 1); fallen.push([f.x, f.y, Math.random() < 0.33]); }
+  }
+  if (state === "end") {
+    endT += dt;
+    if (result) {
+      dawn = Math.min(1, dawn + dt * 0.25);
+      if (endT > 1.2 && Math.random() < dt * 6) hearts.push(newHeart(rand(10, W - 10), H + 4));
+    } else {
+      if (Math.random() < dt * 25) drops.push([rand(0, W + 30), -4, rand(70, 100)]);
+      if (endT > 1.5) for (const p of fallen) { p[0] += dt * (10 + (p[1] - GROUND_Y)); p[1] += Math.sin(t * 4 + p[0]) * 0.1; }
+    }
+  }
+  for (const h of [...hearts]) {
+    if (h.delay > 0) { h.delay -= dt; continue; }
+    h.t += dt;
+    if (h.target) {
+      const k = Math.min(1, h.t / 1.2), e = 1 - (1 - k) ** 3;
+      h.x = h.sx + (h.target[0] - h.sx) * e; h.y = h.sy + (h.target[1] - h.sy) * e + Math.sin(t * 2 + h.phase) * 1.2 * e;
+    } else {
+      h.y -= 22 * dt; h.x += Math.sin(t * 2 + h.phase) * 10 * dt;
+      if (h.t > h.life + 4 + OY / 22) hearts.splice(hearts.indexOf(h), 1);
+    }
+  }
+  for (const d of [...drops]) { d[0] -= d[2] * 0.25 * dt; d[1] += d[2] * dt; if (d[1] > GROUND_Y + 10) drops.splice(drops.indexOf(d), 1); }
+  for (const ff of fireflies) { ff[2] += dt; ff[0] += Math.sin(ff[2] * 0.7 + ff[1]) * 6 * dt; ff[1] += Math.cos(ff[2] * 0.9 + ff[0] * 0.1) * 4 * dt; }
+  if (!meteor && Math.random() < dt * 0.12) meteor = [rand(40, W + 20), rand(0, 40 + OY), 0];
+  if (meteor) { meteor[2] += dt; if (meteor[2] > 0.9) meteor = null; }
+}
+
+function line(x0, y0, x1, y1, col) {
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+  ctx.fillStyle = rgb(col);
+  for (let i = 0; i <= n; i++) ctx.fillRect(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n), 1, 1);
+}
+function drawSky() {
+  ctx.globalAlpha = 1; ctx.drawImage(bgNight, 0, 0);
+  if (dawn > 0) { ctx.globalAlpha = 0.78 * dawn; ctx.drawImage(bgDawn, 0, 0); ctx.globalAlpha = 1; }
+  for (const [x, y, ph, big] of stars) {
+    const tw = Math.sin(t * 2.2 + ph);
+    if (tw > -0.3) {
+      px(x, y, tw > 0.6 ? [255, 255, 230] : [170, 180, 230]);
+      if (big && tw > 0.5) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) px(x + dx, y + dy, [140, 150, 220]);
+    }
+  }
+  ctx.drawImage(moon, 138, 38 + Math.round(OY * 0.45));
+  if (meteor) {
+    const [mx, my, mt] = meteor, hx = mx - mt * 90, hy = my + mt * 45;
+    for (let i = 0; i < 14; i++) px(hx + i * 2, hy - i, lerp([255, 255, 255], [60, 70, 150], i / 14));
+  }
+}
+function drawGrass(front) {
+  for (const [x, y, h, c, ph] of grass) {
+    if ((y > GROUND_Y + 14) !== front) continue;
+    line(x, y, x + Math.sin(t * 1.6 + ph + x * 0.05) * 1.5, y - h, c);
+  }
+}
+function disk(cx, cy, r, col) { ctx.fillStyle = rgb(col); for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) if (x * x + y * y <= r * r + r) ctx.fillRect(cx + x, cy + y, 1, 1); }
+function drawFlower() {
+  const g = state === "grow" ? grow : 1, stemK = Math.min(1, g / 0.55), sx = Math.sin(t * 1.1) * 2.5;
+  const tx = HEAD_X + sx * stemK, ty = STEM_BOTTOM[1] - (STEM_BOTTOM[1] - HEAD_Y) * stemK;
+  const [bx, by] = STEM_BOTTOM, pts = [];
+  for (let i = 0; i <= 20; i++) {
+    const s = i / 20, mx = bx + (tx - bx) * 0.3;
+    pts.push([(1 - s) ** 2 * bx + 2 * (1 - s) * s * mx + s * s * tx, (1 - s) ** 2 * by + 2 * (1 - s) * s * ((by + ty) / 2) + s * s * ty]);
+  }
+  for (let i = 0; i < 20; i++) { line(pts[i][0] + 1, pts[i][1], pts[i + 1][0] + 1, pts[i + 1][1], [30, 110, 50]); line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], [70, 170, 80]); }
+  if (stemK > 0.5) {
+    const lk = Math.min(1, (stemK - 0.5) * 2);
+    for (const [i, side] of [[14, -1], [10, 1]]) {
+      const [x, y] = pts[i], ln = 14 * lk;
+      for (let k = 0; k <= ln; k++) {
+        const u = k / ln, half = Math.sin(u * Math.PI) * 3 * lk, cx = x + side * k, cy = y - 6 * lk * u;
+        ctx.fillStyle = "rgb(40,140,60)"; ctx.fillRect(Math.round(cx), Math.round(cy - half), 1, Math.max(1, Math.round(half * 2)));
+      }
+      line(x, y, x + side * ln * 0.7, y - 4 * lk, [90, 190, 90]);
+    }
+  }
+  CX = Math.round(tx); CY = Math.round(ty);
+  if (g > 0.55) {
+    const step = Math.max(1, Math.min(6, Math.floor((g - 0.55) / 0.45 * 6 + 1))), sw = swayDeg(), unfold = (1 - Math.min(1, (g - 0.55) / 0.45)) * 40;
+    petals.forEach((p, i) => blitPetal(tx, ty, p + sw + unfold * (i % 2 ? 1 : -1), step));
+  }
+  if (g > 0.45) {
+    const r = g > 0.55 ? 7 : 4;
+    disk(CX, CY, r + 1, [150, 80, 20]); disk(CX, CY, r, [240, 160, 40]);
+    ctx.fillStyle = "rgb(205,120,30)";
+    for (let y = CY - r; y <= CY + r; y++) for (let x = CX - r; x <= CX + r; x++)
+      if ((x - CX) ** 2 + (y - CY) ** 2 <= r * r && (x + y) % 3 === 0) ctx.fillRect(x, y, 1, 1);
+    disk(CX - 2, CY - 2, 2, [255, 210, 110]);
+  }
+}
+function drawFx() {
+  for (const f of falling) blitPetal(f.x, f.y, f.angle);
+  for (const ff of fireflies) {
+    const glow = (Math.sin(t * 3 + ff[2] * 2) + 1) / 2;
+    if (glow > 0.25) {
+      px(ff[0], ff[1], [240, 255, 150]);
+      if (glow > 0.7) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) px(ff[0] + dx, ff[1] + dy, [120, 160, 60]);
+    }
+  }
+  for (const d of drops) line(d[0], d[1], d[0] + 1, d[1] - 3, [120, 140, 220]);
+  for (const h of hearts) {
+    if (h.delay > 0) continue;
+    ctx.globalAlpha = (!h.target && h.t > h.life) ? Math.max(0, 1 - (h.t - h.life) / 4) : 1;
+    ctx.drawImage(h.img, Math.round(h.x), Math.round(h.y));
+  }
+  ctx.globalAlpha = 1;
+}
+function drawUi() {
+  const ty = 26 + Math.round(OY * 0.4);
+  if (state === "grow" && grow < 1) return;
+  if (state === "play" && !text) drawText("сорви лепесток", 1, CREAM, ty);
+  if (state === "end" && result) drawText("ЛЮБИТ!", 3, PINK, ty, textPop);
+  else if (state === "end") {
+    drawText("НЕ ЛЮБИТ", 3, BLUE, ty, textPop);
+  } else if (text) drawText(text, 3, text === "ЛЮБИТ" ? PINK : BLUE, ty, textPop);
+}
+function render() {
+  drawSky(); drawGrass(false);
+  for (const [x, y, flip] of fallen) if (x > -16 && x < W + 4) ctx.drawImage(flip ? flatFlip : flat, Math.round(x) - 7, Math.round(y) - 2);
+  drawFlower(); drawGrass(true); drawFx(); drawUi();
+}
+
+// ---------- управление ----------
+addEventListener("resize", setup);
+document.addEventListener("pointerdown", e => {
+  e.preventDefault(); unlockAudio();
+  const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) / r.width * W, my = (e.clientY - r.top) / r.height * H;
+  if (state === "end") { if (endT > 2) reset(); }
+  else if (state === "grow") tear();
+  else { const i = petalAt(mx, my); if (i !== null) tear(i); }
+});
+addEventListener("keydown", e => {
+  unlockAudio();
+  if (e.code === "KeyR" || (e.code === "Space" && state === "end")) reset();
+  else if (e.code === "Space") { e.preventDefault(); tear(); }
+  else if (e.code === "KeyS") {
+    const [c, x] = canvas(W * 4, H * 4); x.drawImage(cv, 0, 0, W * 4, H * 4);
+    const a = document.createElement("a"); a.download = "открытка-ромашка.png"; a.href = c.toDataURL(); a.click();
+  }
+});
+
+let last = performance.now();
+function frame(now) {
+  update(Math.min((now - last) / 1000, 0.05)); last = now;
+  render(); requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
